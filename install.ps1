@@ -105,12 +105,15 @@ New-Service `
     -BinaryPathName "`"$binary`"" `
     -DisplayName 'OzgurGuard RDP Oturum Kilit Guvenligi' `
     -StartupType Automatic `
-    -Description 'RDP ve konsol oturumlarinda masaustunu kilitleyen ve brute-force saldirilarina karsi oturumu kesen kurumsal guvenlik kapisi. IIS ve Web servislerine dokunmaz.'
+    -Description 'RDP ve konsol oturumlarinda masaustunu kilitleyen ve brute-force saldirilarina karsi oturumu kesen kurumsal guvenlik kapisi. IIS ve Web servislerine dokunmaz.' | Out-Null
 
 # Kurtarma seçeneklerini ayarla (Çökerse servisi hemen yeniden başlat)
 & sc.exe failure $serviceName reset= 86400 actions= restart/1000/restart/2000/restart/5000 | Out-Null
 
 Start-Service -Name $serviceName
+Start-Sleep -Seconds 1
+$svc = Get-Service -Name $serviceName
+Write-Host "  -> Servis durumu: $($svc.Status)" -ForegroundColor ($svc.Status -eq 'Running' ? 'Green' : 'Red')
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green

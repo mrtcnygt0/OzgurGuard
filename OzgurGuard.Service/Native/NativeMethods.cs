@@ -71,11 +71,11 @@ public static class NativeMethods
         WTSInit
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+    [StructLayout(LayoutKind.Sequential)]
     public struct WTS_SESSION_INFO
     {
         public int SessionId;
-        public string pWinStationName;
+        public IntPtr pWinStationName;
         public WTS_CONNECTSTATE_CLASS State;
     }
 
@@ -126,7 +126,7 @@ public static class NativeMethods
     [DllImport("wtsapi32.dll", SetLastError = true)]
     public static extern bool WTSQueryUserToken(int sessionId, out IntPtr phToken);
 
-    [DllImport("wtsapi32.dll", SetLastError = true)]
+    [DllImport("wtsapi32.dll", EntryPoint = "WTSEnumerateSessionsW", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern bool WTSEnumerateSessions(
         IntPtr hServer,
         int Reserved,
@@ -190,7 +190,7 @@ public static class NativeMethods
     /// </summary>
     public static List<int> GetActiveSessionIds()
     {
-        var list = new List<int>();
+        var list = new HashSet<int>();
         if (WTSEnumerateSessions(WTS_CURRENT_SERVER_HANDLE, 0, 1, out IntPtr pSessionInfo, out int count))
         {
             try
@@ -200,11 +200,11 @@ public static class NativeMethods
 
                 for (int i = 0; i < count; i++)
                 {
-                    var si = (WTS_SESSION_INFO)Marshal.PtrToStructure(new IntPtr(current), typeof(WTS_SESSION_INFO))!;
+                    var si = Marshal.PtrToStructure<WTS_SESSION_INFO>(new IntPtr(current));
                     current += structSize;
 
-                    // Session 0 SYSTEM servisidir; 0'dan büyük ve Active oturumları al
-                    if (si.SessionId > 0 && si.State == WTS_CONNECTSTATE_CLASS.WTSActive)
+                    // Session 0 SYSTEM servisidir; 0'dan büyük ve Active/Connected oturumları al
+                    if (si.SessionId > 0 && (si.State == WTS_CONNECTSTATE_CLASS.WTSActive || si.State == WTS_CONNECTSTATE_CLASS.WTSConnected))
                     {
                         list.Add(si.SessionId);
                     }
@@ -216,7 +216,21 @@ public static class NativeMethods
                 WTSFreeMemory(pSessionInfo);
             }
         }
-        return list;
+
+        // Güvenilir Fallback: Aktif masaüstü (explorer.exe) oturumlarını ekle
+        try
+        {
+            foreach (var proc in System.Diagnostics.Process.GetProcessesByName("explorer"))
+            {
+                if (proc.SessionId > 0)
+                {
+                    list.Add(proc.SessionId);
+                }
+            }
+        }
+        catch { }
+
+        return list.ToList();
     }
 
     /// <summary>
