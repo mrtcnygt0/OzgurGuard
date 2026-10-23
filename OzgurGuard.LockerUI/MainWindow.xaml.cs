@@ -60,8 +60,8 @@ public partial class MainWindow : Window
         _countdownTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _countdownTimer.Tick += (_, _) => OnCountdownTick();
 
-        // 3. 50ms Odak Tuzağı (Focus Trap) & TopMost Zorlama
-        _focusTrapTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        // 3. 250ms Odak Tuzağı (Focus Trap) & TopMost Zorlama
+        _focusTrapTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
         _focusTrapTimer.Tick += (_, _) => ForceFocusAndTopmost();
         _focusTrapTimer.Start();
 
@@ -70,100 +70,112 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // Low-level klavye kancasını kur (Alt+Tab, Win, Ctrl+Esc engelle)
-        NativeMethods.InstallKeyboardHook();
-
-        // Görev yöneticisini devre dışı bırak
-        NativeMethods.SetTaskManagerDisabled(true);
-
-        // Masaüstü görev çubuğunu gizle
-        NativeMethods.SetTaskbarVisible(false);
-
-        // Fare imlecini kilit ekranına hapset
-        ClipCursorToWindow();
-
-        this.Activate();
-        this.Focus();
-        PasswordInput.Focus();
-
-        if (string.IsNullOrWhiteSpace(_token))
-        {
-            SetStatus("Bağımsız test modunda başlatıldı.", error: false);
-            return;
-        }
-
-        _client = new IpcClient(_sessionId);
-
         try
         {
-            await _client.ConnectAsync(_token, timeoutMs: 15000, _cts.Token).ConfigureAwait(true);
-            await RunReadLoopAsync().ConfigureAwait(true);
+            // Low-level klavye kancasını kur (Alt+Tab, Win, Ctrl+Esc engelle)
+            NativeMethods.InstallKeyboardHook();
+
+            // Görev yöneticisini devre dışı bırak
+            NativeMethods.SetTaskManagerDisabled(true);
+
+            // Masaüstü görev çubuğunu gizle
+            NativeMethods.SetTaskbarVisible(false);
+
+            this.Activate();
+            this.Focus();
+            PasswordInput.Focus();
+
+            if (string.IsNullOrWhiteSpace(_token))
+            {
+                SetStatus("Bağımsız test modunda başlatıldı.", error: false);
+                return;
+            }
+
+            _client = new IpcClient(_sessionId);
+
+            await _client.ConnectAsync(_token, timeoutMs: 15000, _cts.Token).ConfigureAwait(false);
+            await RunReadLoopAsync().ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            SetStatus($"Güvenlik servisine bağlanılamadı: {ex.Message}", error: true);
+            Dispatcher.Invoke(() => SetStatus($"Güvenlik servisine bağlanılamadı: {ex.Message}", error: true));
         }
     }
 
     private async Task RunReadLoopAsync()
     {
-        while (!_cts.IsCancellationRequested && !_isUnlocked)
+        try
         {
-            GateMessage? msg = await _client!.ReadAsync(_cts.Token).ConfigureAwait(true);
-            if (msg is null) return;
+            while (!_cts.IsCancellationRequested && !_isUnlocked)
+            {
+                GateMessage? msg = await _client!.ReadAsync(_cts.Token).ConfigureAwait(false);
+                if (msg is null) break;
 
-            ApplyMessage(msg);
+                Dispatcher.Invoke(() => ApplyMessage(msg));
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Dispatcher.Invoke(() => SetStatus($"Haberleşme kesildi: {ex.Message}", error: true));
         }
     }
 
     private void ApplyMessage(GateMessage msg)
     {
-        switch (msg.Type)
+        try
         {
-            case "challenge":
-                if (!string.IsNullOrWhiteSpace(msg.UserName))
-                {
-                    UserText.Text = $"Kullanıcı: {msg.UserName}";
-                }
+            switch (msg.Type)
+            {
+                case "challenge":
+                    if (!string.IsNullOrWhiteSpace(msg.UserName))
+                    {
+                        UserText.Text = $"Kullanıcı: {msg.UserName}";
+                    }
 
-                _maxAttempts = msg.MaxAttempts > 0 ? msg.MaxAttempts : 3;
-                _attemptsRemaining = msg.AttemptsRemaining;
-                _remainingSeconds = msg.RemainingSeconds > 0 ? msg.RemainingSeconds : 45;
-                _totalSeconds = _remainingSeconds;
+                    _maxAttempts = msg.MaxAttempts > 0 ? msg.MaxAttempts : 3;
+                    _attemptsRemaining = msg.AttemptsRemaining;
+                    _remainingSeconds = msg.RemainingSeconds > 0 ? msg.RemainingSeconds : 45;
+                    _totalSeconds = _remainingSeconds;
 
-                CountdownBar.Maximum = _totalSeconds;
-                CountdownBar.Value = _remainingSeconds;
-                CountdownText.Text = $"Kalan süre: {_remainingSeconds} sn";
-                AttemptsText.Text = $"Kalan deneme: {_attemptsRemaining}/{_maxAttempts}";
+                    CountdownBar.Maximum = _totalSeconds;
+                    CountdownBar.Value = _remainingSeconds;
+                    CountdownText.Text = $"Kalan süre: {_remainingSeconds} sn";
+                    AttemptsText.Text = $"Kalan deneme: {_attemptsRemaining}/{_maxAttempts}";
 
-                if (msg.DevelopmentMode)
-                {
-                    TestExitButton.Visibility = Visibility.Visible;
-                }
+                    if (msg.DevelopmentMode)
+                    {
+                        TestExitButton.Visibility = Visibility.Visible;
+                    }
 
-                _countdownTimer.Start();
-                SetStatus("Lütfen yönetici doğrulama parolasını girin.", error: false);
-                PasswordInput.Focus();
-                break;
+                    _countdownTimer.Start();
+                    SetStatus("Lütfen yönetici doğrulama parolasını girin.", error: false);
+                    PasswordInput.Focus();
+                    break;
 
-            case "result":
-                _attemptsRemaining = msg.AttemptsRemaining;
-                AttemptsText.Text = $"Kalan deneme: {_attemptsRemaining}/{_maxAttempts}";
+                case "result":
+                    _attemptsRemaining = msg.AttemptsRemaining;
+                    AttemptsText.Text = $"Kalan deneme: {_attemptsRemaining}/{_maxAttempts}";
 
-                if (msg.Success)
-                {
-                    _isUnlocked = true;
-                    SetStatus(msg.Message ?? "Doğrulama başarılı. Erişim verildi.", error: false, success: true);
-                    CleanupAndClose();
-                    return;
-                }
+                    if (msg.Success)
+                    {
+                        _isUnlocked = true;
+                        SetStatus(msg.Message ?? "Doğrulama başarılı. Erişim verildi.", error: false, success: true);
+                        CleanupAndClose();
+                        return;
+                    }
 
-                SetStatus(msg.Message ?? "Hatalı parola.", error: true);
-                FlashErrorShake();
-                PasswordInput.Clear();
-                PasswordInput.Focus();
-                break;
+                    SetStatus(msg.Message ?? "Hatalı parola.", error: true);
+                    FlashErrorShake();
+                    PasswordInput.Clear();
+                    PasswordInput.Focus();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Arayüz güncelleme hatası: {ex.Message}", error: true);
         }
     }
 
@@ -199,15 +211,15 @@ public partial class MainWindow : Window
             {
                 Type = "verify",
                 Password = pwd
-            }, _cts.Token).ConfigureAwait(true);
+            }, _cts.Token).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            SetStatus($"Parola gönderilemedi: {ex.Message}", error: true);
+            Dispatcher.Invoke(() => SetStatus($"Parola gönderilemedi: {ex.Message}", error: true));
         }
         finally
         {
-            VerifyButton.IsEnabled = true;
+            Dispatcher.Invoke(() => VerifyButton.IsEnabled = true);
         }
     }
 
@@ -217,7 +229,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                await _client.SendAsync(new GateMessage { Type = "test_exit" }, _cts.Token).ConfigureAwait(true);
+                await _client.SendAsync(new GateMessage { Type = "test_exit" }, _cts.Token).ConfigureAwait(false);
             }
             catch { }
         }
@@ -241,33 +253,31 @@ public partial class MainWindow : Window
     {
         if (_isUnlocked) return;
 
-        IntPtr hWnd = new WindowInteropHelper(this).Handle;
-        if (hWnd != IntPtr.Zero)
+        try
         {
-            NativeMethods.SetWindowPos(
-                hWnd,
-                NativeMethods.HWND_TOPMOST,
-                0, 0, 0, 0,
-                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_SHOWWINDOW);
+            IntPtr hWnd = new WindowInteropHelper(this).Handle;
+            if (hWnd != IntPtr.Zero)
+            {
+                IntPtr currentForeground = NativeMethods.GetForegroundWindow();
+                if (currentForeground != hWnd)
+                {
+                    NativeMethods.SetWindowPos(
+                        hWnd,
+                        NativeMethods.HWND_TOPMOST,
+                        0, 0, 0, 0,
+                        NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_SHOWWINDOW);
 
-            NativeMethods.SetForegroundWindow(hWnd);
+                    NativeMethods.SetForegroundWindow(hWnd);
+                }
+            }
         }
+        catch { }
     }
 
     private void ClipCursorToWindow()
     {
-        try
-        {
-            var rect = new NativeMethods.RECT
-            {
-                Left = 0,
-                Top = 0,
-                Right = (int)SystemParameters.PrimaryScreenWidth,
-                Bottom = (int)SystemParameters.PrimaryScreenHeight
-            };
-            NativeMethods.ClipCursor(ref rect);
-        }
-        catch { }
+        // RDP oturumlarında DPI ölçekleme uyumsuzlukları ve fare kilitlenmelerini önlemek
+        // amacıyla imleç sınırlanmaz. Tam ekran TopMost pencere ve klavye kancası güvenliği sağlar.
     }
 
     private void FlashErrorShake()

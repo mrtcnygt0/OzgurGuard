@@ -1,13 +1,25 @@
 using System.Diagnostics;
+using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using OzgurGuard.LockerUI.Native;
 
 namespace OzgurGuard.LockerUI;
 
 public partial class App : Application
 {
+    private static readonly string CrashLogPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "OzgurGuard",
+        "locker_crash.log");
+
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        // Global yakalanmamış istisna yöneticileri (0xe0434352 çökmesini engeller)
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnCurrentDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
         int sessionId = Process.GetCurrentProcess().SessionId;
         string token = string.Empty;
         bool devMode = false;
@@ -35,9 +47,52 @@ public partial class App : Application
         }
         catch { }
 
-        var mainWindow = new MainWindow(sessionId, token, devMode);
-        mainWindow.Show();
-        mainWindow.Activate();
-        mainWindow.Focus();
+        try
+        {
+            var mainWindow = new MainWindow(sessionId, token, devMode);
+            mainWindow.Show();
+            mainWindow.Activate();
+            mainWindow.Focus();
+        }
+        catch (Exception ex)
+        {
+            LogCrash("MainWindow_Startup", ex);
+        }
+    }
+
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        LogCrash("DispatcherUnhandledException", e.Exception);
+        e.Handled = true; // Windows hata diyalogunun (0xe0434352) açılmasını ve sürecin sonlanmasını engeller
+    }
+
+    private void OnCurrentDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is Exception ex)
+        {
+            LogCrash("CurrentDomainUnhandledException", ex);
+        }
+    }
+
+    private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        LogCrash("UnobservedTaskException", e.Exception);
+        e.SetObserved();
+    }
+
+    private static void LogCrash(string source, Exception ex)
+    {
+        try
+        {
+            string? dir = Path.GetDirectoryName(CrashLogPath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+
+            string logEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{source}] {ex.GetType().FullName}: {ex.Message}{Environment.NewLine}{ex.StackTrace}{Environment.NewLine}{Environment.NewLine}";
+            File.AppendAllText(CrashLogPath, logEntry);
+        }
+        catch { }
     }
 }
