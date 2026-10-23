@@ -1,0 +1,8 @@
+{
+  "name": "ÖzgürAuth - RDP Oturum Doğrulama Sistemi",
+  "description": "Özgür Zaman Kontrol Sistemleri RDP ve konsol oturumları için ikinci faktör parola ve oturum kapısı doğrulama sistemi.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
