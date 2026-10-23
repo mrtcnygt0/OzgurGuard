@@ -113,7 +113,9 @@ New-Service `
 Start-Service -Name $serviceName
 Start-Sleep -Seconds 1
 $svc = Get-Service -Name $serviceName
-Write-Host "  -> Servis durumu: $($svc.Status)" -ForegroundColor ($svc.Status -eq 'Running' ? 'Green' : 'Red')
+$statusColor = 'Red'
+if ($svc -and $svc.Status -eq 'Running') { $statusColor = 'Green' }
+Write-Host "  -> Servis durumu: $($svc.Status)" -ForegroundColor $statusColor
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
